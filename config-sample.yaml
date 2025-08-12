@@ -7,6 +7,7 @@ export_formats:
 max_playlists: 100
 output_dir: results
 parallel_search: true
+log_level: INFO
 search_strategies:
 - exact_title
 - channel_playlists

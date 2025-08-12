@@ -42,23 +42,26 @@ from config import Config
 
 class CLIInterface:
     """Enhanced CLI interface with rich output."""
-    
-    def __init__(self):
+
+    def __init__(self, config: Config):
         self.console = Console() if RICH_AVAILABLE else None
-        self.config = Config()
+        self.config = config
         self.setup_logging()
         self.finder = None
-    
+
     def setup_logging(self):
         """Setup logging configuration."""
         log_dir = Path("logs")
         log_dir.mkdir(exist_ok=True)
-        
+
         log_file = log_dir / f"playlist_finder_{datetime.now():%Y%m%d}.log"
-        
+
+        level_name = self.config.get("log_level", "INFO").upper()
+        log_level = getattr(logging, level_name, logging.INFO)
+
         if RICH_AVAILABLE:
             logging.basicConfig(
-                level=logging.INFO,
+                level=log_level,
                 format="%(message)s",
                 handlers=[
                     RichHandler(console=self.console, rich_tracebacks=True),
@@ -67,7 +70,7 @@ class CLIInterface:
             )
         else:
             logging.basicConfig(
-                level=logging.INFO,
+                level=log_level,
                 format='%(asctime)s - %(levelname)s - %(message)s',
                 handlers=[
                     logging.StreamHandler(),
@@ -514,6 +517,8 @@ class CLIInterface:
 
 def main():
     """Main entry point."""
+    config = Config()
+
     parser = argparse.ArgumentParser(
         description="YouTube Playlist Finder - Find playlists containing specific videos",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -560,11 +565,20 @@ def main():
         action="store_true",
         help="Run in interactive mode"
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default=config.get("log_level", "INFO"),
+        help="Logging level",
+    )
     
     args = parser.parse_args()
     
+    if args.log_level != config.get("log_level"):
+        config.set("log_level", args.log_level)
+
     # Create CLI interface
-    cli = CLIInterface()
+    cli = CLIInterface(config)
     
     # Interactive mode
     if args.interactive or not args.video_id:
@@ -572,7 +586,6 @@ def main():
         return
     
     # Command-line mode
-    config = cli.config
     
     # Override config with command-line arguments
     if args.api_key:
