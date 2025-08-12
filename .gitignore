@@ -6,3 +6,18 @@ __pycache__/
 
 # Test caches
 .pytest_cache/
+
+# Local configuration and secrets
+config.yaml
+gui_config.json
+config.json
+.env
+.env.*
+*.env
+*.key
+*.pem
+*.secret
+secrets.*
+
+# Logs
+*.log
