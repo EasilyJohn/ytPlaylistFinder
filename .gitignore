@@ -6,5 +6,3 @@ __pycache__/
 
 # Test caches
 .pytest_cache/
-
-config.yaml
