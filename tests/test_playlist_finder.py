@@ -72,3 +72,17 @@ def test_search_resets_checked_playlists(tmp_path):
         parallel=False,
     )
     assert len(res2) == 1
+
+
+def test_parallel_search_matches_sequential(tmp_path):
+    finder = DummyFinder(cache_dir=str(tmp_path))
+    strategies = [SearchStrategy.EXACT_TITLE, SearchStrategy.CHANNEL_PLAYLISTS]
+
+    sequential = finder.find_playlists("v1", strategies, parallel=False)
+    parallel = finder.find_playlists("v1", strategies, parallel=True)
+
+    seq_ids = [p.id for p in sequential]
+    par_ids = [p.id for p in parallel]
+
+    assert seq_ids == par_ids
+    assert len(sequential) == len(parallel)
