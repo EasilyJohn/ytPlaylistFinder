@@ -157,39 +157,60 @@ class YouTubeAPI:
         request_timeout: int = 10,
     ):
         self.api_key = api_key
-        # Configure HTTP client with timeout to avoid hanging requests
-        import httplib2
-
-        http = httplib2.Http(timeout=request_timeout)
-        self.youtube = build('youtube', 'v3', developerKey=api_key, http=http)
         self.cache = cache_manager or CacheManager()
         self.rate_limiter = RateLimiter()
         self.quota_used = 0
         self.max_retries = 3
         self.request_timeout = request_timeout
-    
-    def _make_request(self, func, *args, **kwargs):
-        cache_key = hashlib.md5(f"{func.__name__}_{args}_{kwargs}".encode()).hexdigest()
-        logging.debug("API request %s with args %s and kwargs %s", func.__name__, args, kwargs)
+        # Thread-local storage for per-thread API clients
+        self._thread_local = threading.local()
+
+    def _get_service(self):
+        """Get or create the YouTube service for the current thread."""
+        if not hasattr(self._thread_local, "youtube"):
+            import httplib2
+
+            http = httplib2.Http(timeout=self.request_timeout)
+            self._thread_local.youtube = build(
+                "youtube", "v3", developerKey=self.api_key, http=http
+            )
+        return self._thread_local.youtube
+
+    def _make_request(self, resource: str, method: str = "list", **kwargs):
+        cache_key = hashlib.md5(
+            f"{resource}.{method}_{kwargs}".encode()
+        ).hexdigest()
+        logging.debug(
+            "API request %s.%s with kwargs %s", resource, method, kwargs
+        )
         cached = self.cache.get(cache_key)
         if cached is not None:
-            logging.debug("Using cached result for %s", func.__name__)
+            logging.debug("Using cached result for %s.%s", resource, method)
             return cached
 
         self.rate_limiter.wait_if_needed()
 
+        service = self._get_service()
+
         for attempt in range(self.max_retries):
             try:
-                logging.debug("Attempt %d for API call %s", attempt + 1, func.__name__)
-                request = func(*args, **kwargs)   # build request
-                result = request.execute()        # <-- execute it
+                logging.debug(
+                    "Attempt %d for API call %s.%s", attempt + 1, resource, method
+                )
+                request_method = getattr(getattr(service, resource)(), method)
+                request = request_method(**kwargs)
+                result = request.execute()
                 self.cache.set(cache_key, result)
                 self.quota_used += 1
-                logging.debug("API call %s succeeded", func.__name__)
+                logging.debug("API call %s.%s succeeded", resource, method)
                 return result
             except HttpError as e:
                 logging.debug(
-                    "API call %s failed with %s on attempt %d", func.__name__, e, attempt + 1
+                    "API call %s.%s failed with %s on attempt %d",
+                    resource,
+                    method,
+                    e,
+                    attempt + 1,
                 )
                 if e.resp.status == 403 and "quotaExceeded" in str(e):
                     raise QuotaExceededException("YouTube API quota exceeded")
@@ -201,21 +222,27 @@ class YouTubeAPI:
                     time.sleep(1)
             except Exception as e:
                 logging.debug(
-                    "API call %s raised %s on attempt %d", func.__name__, e, attempt + 1
+                    "API call %s.%s raised %s on attempt %d",
+                    resource,
+                    method,
+                    e,
+                    attempt + 1,
                 )
                 if attempt == self.max_retries - 1:
                     raise
                 time.sleep(1)
-        logging.error("API call %s failed after %d attempts", func.__name__, self.max_retries)
+        logging.error(
+            "API call %s.%s failed after %d attempts", resource, method, self.max_retries
+        )
         return None
     
     def get_video_info(self, video_id: str) -> Optional[VideoInfo]:
         """Get detailed video information."""
         try:
             response = self._make_request(
-                self.youtube.videos().list,
+                "videos",
                 part="snippet,contentDetails,statistics",
-                id=video_id
+                id=video_id,
             )
             
             if not response or not response.get('items'):
@@ -246,9 +273,9 @@ class YouTubeAPI:
         """Get detailed playlist information."""
         try:
             response = self._make_request(
-                self.youtube.playlists().list,
+                "playlists",
                 part="snippet,contentDetails,status",
-                id=playlist_id
+                id=playlist_id,
             )
             
             if not response or not response.get('items'):
@@ -279,11 +306,11 @@ class YouTubeAPI:
         while True:
             try:
                 response = self._make_request(
-                    self.youtube.playlistItems().list,
+                    "playlistItems",
                     part="contentDetails",
                     playlistId=playlist_id,
                     maxResults=50,
-                    pageToken=page_token
+                    pageToken=page_token,
                 )
                 
                 if not response:
@@ -311,12 +338,12 @@ class YouTubeAPI:
         while len(playlist_ids) < max_results:
             try:
                 response = self._make_request(
-                    self.youtube.search().list,
+                    "search",
                     part="id",
                     q=query,
                     type="playlist",
                     maxResults=min(50, max_results - len(playlist_ids)),
-                    pageToken=page_token
+                    pageToken=page_token,
                 )
                 
                 if not response:
@@ -344,11 +371,11 @@ class YouTubeAPI:
         while len(playlist_ids) < max_results:
             try:
                 response = self._make_request(
-                    self.youtube.playlists().list,
+                    "playlists",
                     part="id",
                     channelId=channel_id,
                     maxResults=min(50, max_results - len(playlist_ids)),
-                    pageToken=page_token
+                    pageToken=page_token,
                 )
                 
                 if not response:
