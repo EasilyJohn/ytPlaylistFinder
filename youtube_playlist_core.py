@@ -91,9 +91,12 @@ class CacheManager:
                     now = datetime.now()
                     self.cache = {
                         k: v for k, v in data.items()
-                        if datetime.fromisoformat(v.get('timestamp', '2000-01-01')) 
+                        if datetime.fromisoformat(v.get('timestamp', '2000-01-01'))
                         > now - timedelta(hours=self.expire_hours)
                     }
+                logging.debug(
+                    "Loaded %d cached entries from %s", len(self.cache), self.cache_file
+                )
             except Exception as e:
                 logging.warning(f"Cache load error: {e}")
                 self.cache = {}
@@ -104,6 +107,9 @@ class CacheManager:
             with self._lock:
                 with open(self.cache_file, 'w') as f:
                     json.dump(self.cache, f, indent=2)
+            logging.debug(
+                "Saved %d cached entries to %s", len(self.cache), self.cache_file
+            )
         except Exception as e:
             logging.warning(f"Cache save error: {e}")
     
@@ -112,8 +118,10 @@ class CacheManager:
         with self._lock:
             if key in self.cache:
                 self.cache_stats["hits"] += 1
+                logging.debug("Cache hit for key %s", key)
                 return self.cache[key].get('data')
             self.cache_stats["misses"] += 1
+            logging.debug("Cache miss for key %s", key)
             return None
     
     def set(self, key: str, value: Any):
@@ -123,6 +131,7 @@ class CacheManager:
                 'data': value,
                 'timestamp': datetime.now().isoformat()
             }
+            logging.debug("Cache set for key %s", key)
             # Save periodically
             if len(self.cache) % 10 == 0:
                 self._save_cache()
@@ -151,20 +160,27 @@ class YouTubeAPI:
     
     def _make_request(self, func, *args, **kwargs):
         cache_key = hashlib.md5(f"{func.__name__}_{args}_{kwargs}".encode()).hexdigest()
+        logging.debug("API request %s with args %s and kwargs %s", func.__name__, args, kwargs)
         cached = self.cache.get(cache_key)
         if cached is not None:
+            logging.debug("Using cached result for %s", func.__name__)
             return cached
 
         self.rate_limiter.wait_if_needed()
 
         for attempt in range(self.max_retries):
             try:
+                logging.debug("Attempt %d for API call %s", attempt + 1, func.__name__)
                 request = func(*args, **kwargs)   # build request
                 result = request.execute()        # <-- execute it
                 self.cache.set(cache_key, result)
                 self.quota_used += 1
+                logging.debug("API call %s succeeded", func.__name__)
                 return result
             except HttpError as e:
+                logging.debug(
+                    "API call %s failed with %s on attempt %d", func.__name__, e, attempt + 1
+                )
                 if e.resp.status == 403 and "quotaExceeded" in str(e):
                     raise QuotaExceededException("YouTube API quota exceeded")
                 elif e.resp.status == 429:
@@ -173,6 +189,7 @@ class YouTubeAPI:
                     raise
                 else:
                     time.sleep(1)
+        logging.error("API call %s failed after %d attempts", func.__name__, self.max_retries)
         return None
     
     def get_video_info(self, video_id: str) -> Optional[VideoInfo]:
@@ -397,6 +414,14 @@ class PlaylistFinder:
         """
         Find playlists containing a video using multiple strategies.
         """
+        logging.debug(
+            "Starting search for video %s with strategies %s (max %d, parallel=%s)",
+            video_id,
+            strategies,
+            max_playlists,
+            parallel,
+        )
+
         # Reset state for a fresh search
         self.found_playlists = []
         self.checked_playlist_ids = set()
@@ -406,9 +431,10 @@ class PlaylistFinder:
         video_info = self.api.get_video_info(video_id)
         if not video_info:
             raise ValueError(f"Video {video_id} not found")
+        logging.debug("Retrieved video info: %s", video_info)
 
         self._update_progress(f"Searching for playlists containing: {video_info.title}", 0)
-        
+
         # Default strategies
         if not strategies:
             strategies = [
@@ -417,10 +443,11 @@ class PlaylistFinder:
                 SearchStrategy.TITLE_AND_CHANNEL,
                 SearchStrategy.KEYWORD_SEARCH
             ]
-        
+            logging.debug("Using default strategies: %s", strategies)
+
         # Collect potential playlist IDs
         all_playlist_ids = set()
-        
+
         for i, strategy in enumerate(strategies):
             if self._stop_event.is_set():
                 raise SearchCancelled()
@@ -428,24 +455,31 @@ class PlaylistFinder:
                 f"Strategy: {strategy.value}",
                 int((i / len(strategies)) * 50)
             )
+            logging.debug("Executing strategy %s", strategy)
             playlist_ids = self._search_by_strategy(strategy, video_info, max_playlists)
+            logging.debug(
+                "Strategy %s found %d playlists", strategy, len(playlist_ids)
+            )
             all_playlist_ids.update(playlist_ids)
-            
+
             if len(all_playlist_ids) >= max_playlists:
+                logging.debug("Reached max playlist limit (%d)", max_playlists)
                 break
-        
+
         # Check playlists for video
         all_playlist_ids = list(all_playlist_ids)[:max_playlists]
+        logging.debug("Checking %d unique playlists for video", len(all_playlist_ids))
         self._update_progress(f"Checking {len(all_playlist_ids)} playlists...", 50)
-        
+
         if parallel:
             found = self._check_playlists_parallel(all_playlist_ids, video_id)
         else:
             found = self._check_playlists_sequential(all_playlist_ids, video_id)
-        
+
         self._update_progress("Search complete!", 100)
         self.cache_manager._save_cache()
-        
+        logging.debug("Search complete: found %d playlists", len(found))
+
         return found
     
     def _search_by_strategy(
@@ -461,10 +495,12 @@ class PlaylistFinder:
             playlist_ids = self.api.search_playlists(video_info.title, max_results)
             
         elif strategy == SearchStrategy.CHANNEL_PLAYLISTS:
+            logging.debug("Fetching playlists for channel %s", video_info.channel_id)
             playlist_ids = self.api.get_channel_playlists(video_info.channel_id, max_results)
             
         elif strategy == SearchStrategy.TITLE_AND_CHANNEL:
             query = f"{video_info.title} {video_info.channel_title}"
+            logging.debug("Searching playlists with query: %s", query)
             playlist_ids = self.api.search_playlists(query, max_results)
             
         elif strategy == SearchStrategy.KEYWORD_SEARCH:
@@ -472,6 +508,7 @@ class PlaylistFinder:
             keywords = video_info.tags[:3] if video_info.tags else []
             if keywords:
                 query = " ".join(keywords)
+                logging.debug("Keyword search with: %s", query)
                 playlist_ids = self.api.search_playlists(query, max_results)
         
         elif strategy == SearchStrategy.POPULAR_PLAYLISTS:
@@ -499,12 +536,13 @@ class PlaylistFinder:
                 raise SearchCancelled()
             if playlist_id in self.checked_playlist_ids:
                 continue
-                
+
             self._update_progress(
                 f"Checking playlist {i+1}/{len(playlist_ids)}",
                 50 + int((i / len(playlist_ids)) * 50)
             )
-            
+            logging.debug("Sequential check for playlist %s", playlist_id)
+
             if self.api.check_video_in_playlist(playlist_id, video_id):
                 info = self.api.get_playlist_info(playlist_id)
                 if info:
@@ -538,6 +576,11 @@ class PlaylistFinder:
         executor = ThreadPoolExecutor(max_workers=max_workers)
         futures = {executor.submit(check_playlist, pid): pid for pid in playlist_ids}
         try:
+            logging.debug(
+                "Parallel check for %d playlists with %d workers",
+                len(playlist_ids),
+                max_workers,
+            )
             for future in as_completed(futures):
                 if self._stop_event.is_set():
                     for f in futures:
@@ -548,6 +591,9 @@ class PlaylistFinder:
                 self._update_progress(
                     f"Checking playlist {checked_count}/{len(playlist_ids)}",
                     50 + int((checked_count / len(playlist_ids)) * 50)
+                )
+                logging.debug(
+                    "Completed check for playlist %s", futures[future]
                 )
 
                 result = future.result()
