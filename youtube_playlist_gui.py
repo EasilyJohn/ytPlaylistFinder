@@ -14,6 +14,20 @@ import os
 from datetime import datetime
 from typing import List, Dict, Optional
 import logging
+from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
+
+# Configure logging to file for debugging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(Path("playlist_finder.log")),
+        logging.StreamHandler(),
+    ],
+)
 
 # Import core module
 try:
@@ -23,6 +37,7 @@ try:
     )
 except ImportError:
     messagebox.showerror("Error", "youtube_playlist_core.py not found!")
+    logger.error("youtube_playlist_core.py not found")
     exit(1)
 
 
@@ -543,28 +558,34 @@ How to use:
         """Preview video information."""
         video_input = self.video_input.get().strip()
         if not video_input:
+            logger.warning("Preview requested without video input")
             return
-        
+
         video_id = self.extract_video_id(video_input)
         if not video_id:
             messagebox.showwarning("Invalid Input", "Please enter a valid YouTube video URL or ID")
+            logger.warning("Invalid video input for preview: %s", video_input)
             return
-        
+
         if not self.api_key.get():
             messagebox.showwarning("No API Key", "Please set your API key in Settings first")
+            logger.warning("Preview attempted without API key")
             return
-        
+
         try:
             if not self.finder:
                 self.finder = PlaylistFinder(self.api_key.get())
-            
+
             video_info = self.finder.api.get_video_info(video_id)
             if video_info:
                 self.display_video_preview(video_info)
+                logger.info("Preview loaded for video %s", video_id)
             else:
                 messagebox.showerror("Error", "Could not fetch video information")
+                logger.error("Could not fetch video information for %s", video_id)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to preview video: {e}")
+            logger.error("Failed to preview video %s: %s", video_input, e)
     
     def display_video_preview(self, video_info: VideoInfo):
         """Display video preview in the search tab."""
@@ -589,15 +610,18 @@ How to use:
         video_input = self.video_input.get().strip()
         if not video_input:
             messagebox.showwarning("Input Required", "Please enter a video URL or ID")
+            logger.warning("Search attempted without video input")
             return
-        
+
         video_id = self.extract_video_id(video_input)
         if not video_id:
             messagebox.showwarning("Invalid Input", "Please enter a valid YouTube video URL or ID")
+            logger.warning("Invalid video input for search: %s", video_input)
             return
-        
+
         if not self.api_key.get():
             messagebox.showwarning("API Key Required", "Please set your API key in Settings")
+            logger.warning("Search attempted without API key")
             return
         
         # Get selected strategies
@@ -610,15 +634,22 @@ How to use:
         }
         
         strategies = [strategy_map[name] for name, var in self.strategy_vars.items() if var.get()]
-        
+
         if not strategies:
             messagebox.showwarning("No Strategies", "Please select at least one search strategy")
+            logger.warning("Search attempted without selecting strategies")
             return
         
         # Initialize finder if needed
         if not self.finder:
             self.finder = PlaylistFinder(self.api_key.get())
-        
+
+        logger.info(
+            "Starting search for video %s with strategies %s",
+            video_id,
+            [s.name for s in strategies],
+        )
+
         # Disable search button
         self.search_btn.config(state=tk.DISABLED)
         self.status_label.config(text="Searching...")
@@ -660,6 +691,7 @@ How to use:
                     progress = self.search_thread.progress_queue.get_nowait()
                     if progress[0] == "progress":
                         self.progress_label.config(text=progress[1])
+                        logger.info(progress[1])
                         if progress[2] is not None:
                             self.progress_bar['value'] = progress[2]
             except queue.Empty:
@@ -686,30 +718,37 @@ How to use:
         
         # Show completion message
         if playlists:
-            messagebox.showinfo("Search Complete", 
+            messagebox.showinfo("Search Complete",
                               f"Found {len(playlists)} playlists containing the video!")
         else:
-            messagebox.showinfo("Search Complete", 
+            messagebox.showinfo("Search Complete",
                               "No playlists found containing this video.")
-    
+        logger.info(
+            "Search complete for video %s: %d playlists found",
+            video_info.id,
+            len(playlists),
+        )
+
     def on_search_error(self, error_msg: str):
         """Handle search error."""
         self.search_btn.config(state=tk.NORMAL)
         self.progress_bar.pack_forget()
         self.progress_label.config(text="")
         self.status_label.config(text="Search failed")
-        
+
         messagebox.showerror("Search Error", f"Search failed: {error_msg}")
-    
+        logger.error("Search failed: %s", error_msg)
+
     def on_quota_error(self):
         """Handle quota exceeded error."""
         self.search_btn.config(state=tk.NORMAL)
         self.progress_bar.pack_forget()
         self.progress_label.config(text="")
         self.status_label.config(text="Quota exceeded")
-        
-        messagebox.showerror("Quota Exceeded", 
+
+        messagebox.showerror("Quota Exceeded",
                            "YouTube API quota exceeded. Please try again tomorrow.")
+        logger.error("YouTube API quota exceeded")
     
     def display_results(self, video_info: VideoInfo, playlists: List[PlaylistInfo]):
         """Display search results in the results tab."""
@@ -785,6 +824,7 @@ How to use:
         """Export results in specified format."""
         if not self.current_results:
             messagebox.showwarning("No Results", "No results to export")
+            logger.warning("Export attempted with no results")
             return
         
         # Ask for filename
@@ -815,8 +855,10 @@ How to use:
                     filename
                 )
                 messagebox.showinfo("Export Successful", f"Results exported to {filename}")
+                logger.info("Results exported to %s", filename)
             except Exception as e:
                 messagebox.showerror("Export Error", f"Failed to export: {e}")
+                logger.error("Failed to export results: %s", e)
     
     def start_batch_search(self):
         """Start batch search."""
@@ -824,6 +866,7 @@ How to use:
         text = self.batch_text.get("1.0", tk.END).strip()
         if not text:
             messagebox.showwarning("No Input", "Please enter video IDs or URLs")
+            logger.warning("Batch search attempted without input")
             return
         
         video_ids = []
@@ -836,10 +879,12 @@ How to use:
         
         if not video_ids:
             messagebox.showwarning("No Valid IDs", "No valid video IDs found")
+            logger.warning("Batch search found no valid video IDs")
             return
         
         if not self.api_key.get():
             messagebox.showwarning("API Key Required", "Please set your API key in Settings")
+            logger.warning("Batch search attempted without API key")
             return
         
         # Initialize finder if needed
@@ -849,29 +894,35 @@ How to use:
         # Clear results
         self.batch_results.delete("1.0", tk.END)
         self.batch_btn.config(state=tk.DISABLED)
-        
+
+        logger.info("Starting batch search for %d videos", len(video_ids))
+
         # Start batch search in thread
         def batch_search():
             for i, video_id in enumerate(video_ids, 1):
                 self.batch_results.insert(tk.END, f"[{i}/{len(video_ids)}] Searching {video_id}...\n")
                 self.batch_results.see(tk.END)
                 self.root.update()
-                
+                logger.info("Batch search %d/%d for video %s", i, len(video_ids), video_id)
+
                 try:
                     playlists = self.finder.find_playlists(
                         video_id,
                         max_playlists=self.batch_max.get()
                     )
                     self.batch_results.insert(tk.END, f"  Found {len(playlists)} playlists\n")
+                    logger.info("Found %d playlists for %s", len(playlists), video_id)
                 except Exception as e:
                     self.batch_results.insert(tk.END, f"  Error: {e}\n")
-                
+                    logger.error("Batch search error for %s: %s", video_id, e)
+
                 self.batch_results.see(tk.END)
                 self.root.update()
-            
+
             self.batch_results.insert(tk.END, "\nBatch search complete!\n")
             self.batch_btn.config(state=tk.NORMAL)
-        
+            logger.info("Batch search complete")
+
         thread = threading.Thread(target=batch_search, daemon=True)
         thread.start()
     
@@ -887,8 +938,10 @@ How to use:
                     content = f.read()
                 self.batch_text.delete("1.0", tk.END)
                 self.batch_text.insert("1.0", content)
+                logger.info("Loaded batch input file %s", filename)
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load file: {e}")
+                logger.error("Failed to load batch file %s: %s", filename, e)
     
     def toggle_api_key_visibility(self):
         """Toggle API key visibility."""
@@ -902,8 +955,10 @@ How to use:
         if self.api_key.get():
             self.save_config()
             messagebox.showinfo("Saved", "API key saved successfully")
+            logger.info("API key saved")
         else:
             messagebox.showwarning("No Key", "Please enter an API key")
+            logger.warning("Attempted to save empty API key")
     
     def clear_cache(self):
         """Clear the cache."""
@@ -915,8 +970,10 @@ How to use:
                     shutil.rmtree(cache_dir)
                     os.makedirs(cache_dir)
                 messagebox.showinfo("Success", "Cache cleared successfully")
+                logger.info("Cache cleared at %s", cache_dir)
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to clear cache: {e}")
+                logger.error("Failed to clear cache: %s", e)
     
     def update_statistics(self):
         """Update statistics display."""
@@ -962,8 +1019,8 @@ How to use:
                     self.max_playlists.set(config.get('max_playlists', 100))
                     self.cache_enabled.set(config.get('cache_enabled', True))
                     self.parallel_search.set(config.get('parallel_search', True))
-            except:
-                pass
+            except Exception as e:
+                logger.error("Failed to load GUI config: %s", e)
     
     def save_config(self):
         """Save configuration to file."""
@@ -973,9 +1030,10 @@ How to use:
             'cache_enabled': self.cache_enabled.get(),
             'parallel_search': self.parallel_search.get()
         }
-        
+
         with open("gui_config.json", 'w') as f:
             json.dump(config, f, indent=2)
+        logger.info("GUI configuration saved")
     
     def center_window(self):
         """Center the window on screen."""
