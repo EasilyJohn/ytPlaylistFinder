@@ -58,14 +58,22 @@ pip install -r requirements.txt
 
 ### 3. Set up your API key
 
-#### Option A: Using configuration file
-Both interfaces read settings from `config.yaml`. Copy `config-sample.yaml` and edit:
+Provide your YouTube Data API key using any of these methods:
+
+#### Option A: Configuration file
+Copy `config-sample.yaml` to `config.yaml` and edit:
 ```yaml
 api_key: "YOUR_YOUTUBE_API_KEY_HERE"
 max_playlists: 100
 cache_enabled: true
 ```
-YAML is the canonical format; a JSON file (`config.json`) is also accepted.
+For the GUI, you can alternatively create a `gui_config.json` file:
+```json
+{
+  "api_key": "YOUR_YOUTUBE_API_KEY_HERE"
+}
+```
+YAML is the canonical format; JSON config files (`config.json` or `gui_config.json`) are also accepted.
 
 #### Option B: Environment variable
 ```bash
