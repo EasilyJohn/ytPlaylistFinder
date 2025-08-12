@@ -132,9 +132,11 @@ class CacheManager:
                 'timestamp': datetime.now().isoformat()
             }
             logging.debug("Cache set for key %s", key)
-            # Save periodically
-            if len(self.cache) % 10 == 0:
-                self._save_cache()
+            # Determine if we should save while holding the lock
+            should_save = len(self.cache) % 10 == 0
+
+        if should_save:
+            self._save_cache()
     
     def get_stats(self) -> Dict:
         """Get cache statistics."""
