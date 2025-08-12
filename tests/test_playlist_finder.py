@@ -86,3 +86,15 @@ def test_parallel_search_matches_sequential(tmp_path):
 
     assert seq_ids == par_ids
     assert len(sequential) == len(parallel)
+
+
+def test_playlist_check_handles_errors(tmp_path):
+    class ErrorAPI(FakeAPI):
+        def check_video_in_playlist(self, playlist_id, video_id):
+            raise TimeoutError("timeout")
+
+    finder = DummyFinder(cache_dir=str(tmp_path))
+    finder.api = ErrorAPI()
+
+    res = finder.find_playlists("v1", [SearchStrategy.EXACT_TITLE], parallel=True)
+    assert res == []

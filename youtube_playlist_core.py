@@ -149,14 +149,24 @@ class CacheManager:
 
 class YouTubeAPI:
     """Enhanced YouTube API wrapper with retry logic and rate limiting."""
-    
-    def __init__(self, api_key: str, cache_manager: Optional[CacheManager] = None):
+
+    def __init__(
+        self,
+        api_key: str,
+        cache_manager: Optional[CacheManager] = None,
+        request_timeout: int = 10,
+    ):
         self.api_key = api_key
-        self.youtube = build('youtube', 'v3', developerKey=api_key)
+        # Configure HTTP client with timeout to avoid hanging requests
+        import httplib2
+
+        http = httplib2.Http(timeout=request_timeout)
+        self.youtube = build('youtube', 'v3', developerKey=api_key, http=http)
         self.cache = cache_manager or CacheManager()
         self.rate_limiter = RateLimiter()
         self.quota_used = 0
         self.max_retries = 3
+        self.request_timeout = request_timeout
     
     def _make_request(self, func, *args, **kwargs):
         cache_key = hashlib.md5(f"{func.__name__}_{args}_{kwargs}".encode()).hexdigest()
@@ -189,6 +199,13 @@ class YouTubeAPI:
                     raise
                 else:
                     time.sleep(1)
+            except Exception as e:
+                logging.debug(
+                    "API call %s raised %s on attempt %d", func.__name__, e, attempt + 1
+                )
+                if attempt == self.max_retries - 1:
+                    raise
+                time.sleep(1)
         logging.error("API call %s failed after %d attempts", func.__name__, self.max_retries)
         return None
     
@@ -565,13 +582,16 @@ class PlaylistFinder:
         checked_count = 0
 
         def check_playlist(playlist_id):
-            if self._stop_event.is_set() or playlist_id in self.checked_playlist_ids:
-                return None
+            try:
+                if self._stop_event.is_set() or playlist_id in self.checked_playlist_ids:
+                    return None
 
-            if self.api.check_video_in_playlist(playlist_id, video_id):
-                info = self.api.get_playlist_info(playlist_id)
-                if info:
-                    return info
+                if self.api.check_video_in_playlist(playlist_id, video_id):
+                    info = self.api.get_playlist_info(playlist_id)
+                    if info:
+                        return info
+            except Exception as e:
+                logging.debug(f"Error processing playlist {playlist_id}: {e}")
             return None
 
         executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -597,7 +617,14 @@ class PlaylistFinder:
                     "Completed check for playlist %s", futures[future]
                 )
 
-                result = future.result()
+                try:
+                    result = future.result()
+                except Exception as e:
+                    logging.debug(
+                        "Future for playlist %s raised %s", futures[future], e
+                    )
+                    result = None
+
                 if result:
                     found.append(result)
                     logging.info(f"Found in: {result.title}")
