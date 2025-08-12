@@ -34,7 +34,7 @@ logging.basicConfig(
 try:
     from youtube_playlist_core import (
         PlaylistFinder, SearchStrategy, VideoInfo, PlaylistInfo,
-        QuotaExceededException
+        QuotaExceededException, SearchCancelled
     )
 except ImportError:
     messagebox.showerror("Error", "youtube_playlist_core.py not found!")
@@ -71,7 +71,7 @@ class ModernButton(tk.Button):
 
 class SearchThread(threading.Thread):
     """Background thread for searching."""
-    
+
     def __init__(self, finder, video_id, strategies, max_playlists, result_queue):
         super().__init__(daemon=True)
         self.finder = finder
@@ -80,29 +80,35 @@ class SearchThread(threading.Thread):
         self.max_playlists = max_playlists
         self.result_queue = result_queue
         self.progress_queue = queue.Queue()
-    
+
     def run(self):
         try:
             def progress_callback(msg, percent):
                 self.progress_queue.put(("progress", msg, percent))
-            
+
             self.finder.set_progress_callback(progress_callback)
-            
+
             playlists = self.finder.find_playlists(
                 self.video_id,
                 self.strategies,
                 self.max_playlists,
                 parallel=True
             )
-            
+
             video_info = self.finder.api.get_video_info(self.video_id)
-            
+
             self.result_queue.put(("success", video_info, playlists))
-            
+
+        except SearchCancelled:
+            self.result_queue.put(("cancelled", None))
         except QuotaExceededException as e:
             self.result_queue.put(("quota_error", str(e)))
         except Exception as e:
             self.result_queue.put(("error", str(e)))
+
+    def stop(self):
+        """Request the search to stop."""
+        self.finder.cancel_search()
 
 
 class YouTubePlaylistFinderGUI:
@@ -279,12 +285,19 @@ class YouTubePlaylistFinderGUI:
         
         self.progress_bar = ttk.Progressbar(self.progress_frame, mode='determinate',
                                            length=400)
-        
+
         # Search button
         self.search_btn = ModernButton(container, text="🔍 Start Search",
                                       command=self.start_search,
                                       font=("Segoe UI", 12, "bold"))
-        self.search_btn.pack(pady=20)
+        self.search_btn.pack(pady=10)
+
+        # Stop button
+        self.stop_btn = ModernButton(container, text="⏹ Stop Search",
+                                     command=self.stop_search,
+                                     font=("Segoe UI", 12, "bold"),
+                                     state=tk.DISABLED)
+        self.stop_btn.pack(pady=(0, 20))
         
         # Status bar
         self.status_label = tk.Label(container, text="Ready", 
@@ -652,8 +665,9 @@ How to use:
             [s.name for s in strategies],
         )
 
-        # Disable search button
+        # Disable search button and enable stop
         self.search_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
         self.status_label.config(text="Searching...")
         
         # Show progress bar
@@ -669,6 +683,13 @@ How to use:
             self.result_queue
         )
         self.search_thread.start()
+
+    def stop_search(self):
+        """Stop the current search."""
+        if self.search_thread and self.search_thread.is_alive():
+            self.search_thread.stop()
+            self.stop_btn.config(state=tk.DISABLED)
+            self.status_label.config(text="Stopping search...")
     
     def update_progress(self):
         """Update progress from search thread."""
@@ -676,13 +697,15 @@ How to use:
         try:
             while True:
                 result = self.result_queue.get_nowait()
-                
+
                 if result[0] == "success":
                     self.on_search_complete(result[1], result[2])
                 elif result[0] == "error":
                     self.on_search_error(result[1])
                 elif result[0] == "quota_error":
                     self.on_quota_error()
+                elif result[0] == "cancelled":
+                    self.on_search_cancelled()
         except queue.Empty:
             pass
         
@@ -709,6 +732,7 @@ How to use:
         
         # Update UI
         self.search_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
         self.progress_bar.pack_forget()
         self.progress_label.config(text="")
         
@@ -734,6 +758,7 @@ How to use:
     def on_search_error(self, error_msg: str):
         """Handle search error."""
         self.search_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
         self.progress_bar.pack_forget()
         self.progress_label.config(text="")
         self.status_label.config(text="Search failed")
@@ -744,6 +769,7 @@ How to use:
     def on_quota_error(self):
         """Handle quota exceeded error."""
         self.search_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
         self.progress_bar.pack_forget()
         self.progress_label.config(text="")
         self.status_label.config(text="Quota exceeded")
@@ -751,6 +777,14 @@ How to use:
         messagebox.showerror("Quota Exceeded",
                            "YouTube API quota exceeded. Please try again tomorrow.")
         logger.error("YouTube API quota exceeded")
+
+    def on_search_cancelled(self):
+        """Handle user-cancelled search."""
+        self.search_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+        self.progress_bar.pack_forget()
+        self.progress_label.config(text="")
+        self.status_label.config(text="Search cancelled")
     
     def display_results(self, video_info: VideoInfo, playlists: List[PlaylistInfo]):
         """Display search results in the results tab."""
