@@ -5,7 +5,7 @@ import sys
 # Ensure the project root is on sys.path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from youtube_playlist_cli import Config
+from config import Config
 
 def test_empty_config_load(tmp_path, caplog):
     cfg_file = tmp_path / "config.yaml"

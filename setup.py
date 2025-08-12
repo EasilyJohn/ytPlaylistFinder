@@ -8,7 +8,6 @@ import os
 import sys
 import subprocess
 import platform
-import json
 import yaml
 from pathlib import Path
 
@@ -121,19 +120,6 @@ class Setup:
             
             print(f"✅ API key saved to {config_file}")
             
-            # Also save for GUI
-            gui_config = self.project_root / "gui_config.json"
-            gui_config_data = {
-                "api_key": api_key,
-                "max_playlists": 100,
-                "cache_enabled": True,
-                "parallel_search": True
-            }
-            
-            with open(gui_config, 'w') as f:
-                json.dump(gui_config_data, f, indent=2)
-            
-            print(f"✅ GUI config saved to {gui_config}")
             return True
         else:
             print("⚠️ No API key provided. You'll need to set it later.")
