@@ -358,6 +358,11 @@ class QuotaExceededException(Exception):
     pass
 
 
+class SearchCancelled(Exception):
+    """Exception raised when a search operation is cancelled."""
+    pass
+
+
 class PlaylistFinder:
     """Advanced playlist finder with multiple search strategies."""
     
@@ -367,10 +372,15 @@ class PlaylistFinder:
         self.found_playlists = []
         self.checked_playlist_ids = set()
         self.progress_callback = None
+        self._stop_event = threading.Event()
     
     def set_progress_callback(self, callback):
         """Set callback for progress updates."""
         self.progress_callback = callback
+
+    def cancel_search(self):
+        """Signal any running search to stop."""
+        self._stop_event.set()
     
     def _update_progress(self, message: str, percent: int = None):
         """Update progress through callback."""
@@ -387,11 +397,16 @@ class PlaylistFinder:
         """
         Find playlists containing a video using multiple strategies.
         """
+        # Reset state for a fresh search
+        self.found_playlists = []
+        self.checked_playlist_ids = set()
+        self._stop_event.clear()
+
         # Get video info first
         video_info = self.api.get_video_info(video_id)
         if not video_info:
             raise ValueError(f"Video {video_id} not found")
-        
+
         self._update_progress(f"Searching for playlists containing: {video_info.title}", 0)
         
         # Default strategies
@@ -407,6 +422,8 @@ class PlaylistFinder:
         all_playlist_ids = set()
         
         for i, strategy in enumerate(strategies):
+            if self._stop_event.is_set():
+                raise SearchCancelled()
             self._update_progress(
                 f"Strategy: {strategy.value}",
                 int((i / len(strategies)) * 50)
@@ -476,8 +493,10 @@ class PlaylistFinder:
     ) -> List[PlaylistInfo]:
         """Check playlists sequentially."""
         found = []
-        
+
         for i, playlist_id in enumerate(playlist_ids):
+            if self._stop_event.is_set():
+                raise SearchCancelled()
             if playlist_id in self.checked_playlist_ids:
                 continue
                 
@@ -491,9 +510,9 @@ class PlaylistFinder:
                 if info:
                     found.append(info)
                     logging.info(f"Found in: {info.title}")
-            
+
             self.checked_playlist_ids.add(playlist_id)
-        
+
         return found
     
     def _check_playlists_parallel(
@@ -505,38 +524,42 @@ class PlaylistFinder:
         """Check playlists in parallel using thread pool."""
         found = []
         checked_count = 0
-        
+
         def check_playlist(playlist_id):
-            if playlist_id in self.checked_playlist_ids:
+            if self._stop_event.is_set() or playlist_id in self.checked_playlist_ids:
                 return None
-            
+
             if self.api.check_video_in_playlist(playlist_id, video_id):
                 info = self.api.get_playlist_info(playlist_id)
                 if info:
                     return info
             return None
-        
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(check_playlist, pid): pid 
-                for pid in playlist_ids
-            }
-            
+
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        futures = {executor.submit(check_playlist, pid): pid for pid in playlist_ids}
+        try:
             for future in as_completed(futures):
+                if self._stop_event.is_set():
+                    for f in futures:
+                        f.cancel()
+                    raise SearchCancelled()
+
                 checked_count += 1
                 self._update_progress(
                     f"Checking playlist {checked_count}/{len(playlist_ids)}",
                     50 + int((checked_count / len(playlist_ids)) * 50)
                 )
-                
+
                 result = future.result()
                 if result:
                     found.append(result)
                     logging.info(f"Found in: {result.title}")
-                
+
                 playlist_id = futures[future]
                 self.checked_playlist_ids.add(playlist_id)
-        
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
         return found
     
     def export_results(
