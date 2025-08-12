@@ -66,7 +66,7 @@ class Config:
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r') as f:
-                    loaded = yaml.safe_load(f)
+                    loaded = yaml.safe_load(f) or {}
                     # Merge with defaults
                     config = self.DEFAULT_CONFIG.copy()
                     config.update(loaded)
