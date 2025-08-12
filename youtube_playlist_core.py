@@ -8,7 +8,7 @@ import json
 import time
 import logging
 import hashlib
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Dict, List, Optional, Tuple, Any, Set, Callable
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -241,6 +241,55 @@ class YouTubeAPI:
             "API call %s.%s failed after %d attempts", resource, method, self.max_retries
         )
         return None
+
+    def _collect_paginated(
+        self,
+        request_func: Callable[[Optional[str], int], Dict],
+        extract_func: Callable[[Dict], Optional[str]],
+        max_results: int,
+        on_error: Optional[Callable[[Exception], None]] = None,
+    ) -> List[str]:
+        """Generic helper to gather paginated results.
+
+        Args:
+            request_func: Callable accepting ``page_token`` and ``max_results``
+                returning the API response dictionary.
+            extract_func: Callable extracting the desired value from each item.
+            max_results: Maximum number of results to collect.
+            on_error: Optional callable for custom error handling.
+
+        Returns:
+            List of extracted values with length up to ``max_results``.
+        """
+
+        results: List[str] = []
+        page_token: Optional[str] = None
+
+        while len(results) < max_results:
+            try:
+                response = request_func(
+                    page_token, min(50, max_results - len(results))
+                )
+                if not response:
+                    break
+
+                for item in response.get("items", []):
+                    value = extract_func(item)
+                    if value:
+                        results.append(value)
+
+                page_token = response.get("nextPageToken")
+                if not page_token:
+                    break
+
+            except Exception as e:  # pragma: no cover - exercised via tests
+                if on_error:
+                    on_error(e)
+                else:
+                    logging.debug(f"Pagination error: {e}")
+                break
+
+        return results[:max_results]
     
     def get_video_info(self, video_id: str) -> Optional[VideoInfo]:
         """Get detailed video information."""
@@ -337,68 +386,43 @@ class YouTubeAPI:
         return False
     
     def search_playlists(self, query: str, max_results: int = 50) -> List[str]:
-        """Search for playlist IDs based on query."""
-        playlist_ids = []
-        page_token = None
-        
-        while len(playlist_ids) < max_results:
-            try:
-                response = self._make_request(
-                    "search",
-                    part="id",
-                    q=query,
-                    type="playlist",
-                    maxResults=min(50, max_results - len(playlist_ids)),
-                    pageToken=page_token,
-                )
-                
-                if not response:
-                    break
-                
-                for item in response.get('items', []):
-                    if 'playlistId' in item.get('id', {}):
-                        playlist_ids.append(item['id']['playlistId'])
-                
-                page_token = response.get('nextPageToken')
-                if not page_token:
-                    break
-                    
-            except Exception as e:
-                logging.error(f"Search error: {e}")
-                break
-        
-        return playlist_ids[:max_results]
+        """Search for playlist IDs based on a text query."""
+
+        def request(page_token: Optional[str], limit: int) -> Dict:
+            return self._make_request(
+                "search",
+                part="id",
+                q=query,
+                type="playlist",
+                maxResults=limit,
+                pageToken=page_token,
+            )
+
+        return self._collect_paginated(
+            request,
+            lambda item: item.get("id", {}).get("playlistId"),
+            max_results,
+            lambda e: logging.error(f"Search error: {e}"),
+        )
     
     def get_channel_playlists(self, channel_id: str, max_results: int = 50) -> List[str]:
-        """Get all playlists from a channel."""
-        playlist_ids = []
-        page_token = None
-        
-        while len(playlist_ids) < max_results:
-            try:
-                response = self._make_request(
-                    "playlists",
-                    part="id",
-                    channelId=channel_id,
-                    maxResults=min(50, max_results - len(playlist_ids)),
-                    pageToken=page_token,
-                )
-                
-                if not response:
-                    break
-                
-                for item in response.get('items', []):
-                    playlist_ids.append(item['id'])
-                
-                page_token = response.get('nextPageToken')
-                if not page_token:
-                    break
-                    
-            except Exception as e:
-                logging.debug(f"Channel playlists error: {e}")
-                break
-        
-        return playlist_ids[:max_results]
+        """Retrieve all playlist IDs from a channel."""
+
+        def request(page_token: Optional[str], limit: int) -> Dict:
+            return self._make_request(
+                "playlists",
+                part="id",
+                channelId=channel_id,
+                maxResults=limit,
+                pageToken=page_token,
+            )
+
+        return self._collect_paginated(
+            request,
+            lambda item: item.get("id"),
+            max_results,
+            lambda e: logging.debug(f"Channel playlists error: {e}"),
+        )
 
 
 class RateLimiter:
