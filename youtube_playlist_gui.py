@@ -14,21 +14,22 @@ import os
 from datetime import datetime
 from typing import List, Dict, Optional
 import logging
+import argparse
 from pathlib import Path
 from config import Config
 
 
 logger = logging.getLogger(__name__)
 
-# Configure logging to file for debugging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler(Path("playlist_finder.log")),
-        logging.StreamHandler(),
-    ],
-)
+def setup_logging(log_level: str) -> None:
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(Path("playlist_finder.log")),
+            logging.StreamHandler(),
+        ],
+    )
 
 # Import core module
 try:
@@ -113,8 +114,8 @@ class SearchThread(threading.Thread):
 
 class YouTubePlaylistFinderGUI:
     """Main GUI Application."""
-    
-    def __init__(self):
+
+    def __init__(self, config: Optional[Config] = None):
         self.root = tk.Tk()
         self.root.title("YouTube Playlist Finder Pro")
         self.root.geometry("1200x700")
@@ -134,7 +135,7 @@ class YouTubePlaylistFinderGUI:
         self.finder = None
         self.current_results = []
         self.current_video_info = None
-        self.config = Config()
+        self.config = config or Config()
         
         # Search strategies
         self.strategy_vars = {
@@ -1082,7 +1083,22 @@ How to use:
 
 def main():
     """Main entry point."""
-    app = YouTubePlaylistFinderGUI()
+    parser = argparse.ArgumentParser(description="YouTube Playlist Finder GUI")
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Logging level",
+    )
+    args = parser.parse_args()
+
+    config = Config()
+    log_level = args.log_level or config.get("log_level", "INFO")
+    if args.log_level and args.log_level != config.get("log_level"):
+        config.set("log_level", args.log_level)
+
+    setup_logging(log_level)
+
+    app = YouTubePlaylistFinderGUI(config)
     app.run()
 
 

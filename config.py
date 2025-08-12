@@ -11,6 +11,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "cache_dir": ".cache",
     "output_dir": "results",
     "parallel_search": True,
+    "log_level": "INFO",
     "export_formats": ["json", "html"],
     "search_strategies": [
         "exact_title",
