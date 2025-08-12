@@ -514,10 +514,11 @@ class PlaylistFinder:
         elif strategy == SearchStrategy.POPULAR_PLAYLISTS:
             # Search for popular compilation playlists
             queries = ["best of", "compilation", "mix", "playlist"]
+            results_per_query = max(1, max_results // len(queries))  # Guard against zero results
             for query in queries:
                 ids = self.api.search_playlists(
                     f"{query} {video_info.channel_title}",
-                    max_results // len(queries)
+                    results_per_query
                 )
                 playlist_ids.extend(ids)
         
