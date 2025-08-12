@@ -59,12 +59,13 @@ pip install -r requirements.txt
 ### 3. Set up your API key
 
 #### Option A: Using configuration file
-Create a `config.yaml` file:
+Both interfaces read settings from `config.yaml`. Copy `config-sample.yaml` and edit:
 ```yaml
 api_key: "YOUR_YOUTUBE_API_KEY_HERE"
 max_playlists: 100
 cache_enabled: true
 ```
+YAML is the canonical format; a JSON file (`config.json`) is also accepted.
 
 #### Option B: Environment variable
 ```bash
@@ -246,7 +247,8 @@ youtube-playlist-finder/
 ├── youtube_playlist_cli.py     # Command-line interface
 ├── youtube_playlist_gui.py     # Graphical interface
 ├── requirements.txt            # Python dependencies
-├── config.yaml                # Configuration file
+├── config-sample.yaml         # Example configuration
+├── config.yaml                # User configuration
 ├── README.md                  # Documentation
 ├── .cache/                    # Cache directory (auto-created)
 ├── results/                   # Output directory (auto-created)

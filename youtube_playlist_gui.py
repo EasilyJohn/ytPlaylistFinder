@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import logging
 from pathlib import Path
+from config import Config
 
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,7 @@ class YouTubePlaylistFinderGUI:
         self.finder = None
         self.current_results = []
         self.current_video_info = None
+        self.config = Config()
         
         # Search strategies
         self.strategy_vars = {
@@ -1009,30 +1011,19 @@ How to use:
         return None
     
     def load_config(self):
-        """Load configuration from file."""
-        config_file = "gui_config.json"
-        if os.path.exists(config_file):
-            try:
-                with open(config_file, 'r') as f:
-                    config = json.load(f)
-                    self.api_key.set(config.get('api_key', ''))
-                    self.max_playlists.set(config.get('max_playlists', 100))
-                    self.cache_enabled.set(config.get('cache_enabled', True))
-                    self.parallel_search.set(config.get('parallel_search', True))
-            except Exception as e:
-                logger.error("Failed to load GUI config: %s", e)
-    
-    def save_config(self):
-        """Save configuration to file."""
-        config = {
-            'api_key': self.api_key.get(),
-            'max_playlists': self.max_playlists.get(),
-            'cache_enabled': self.cache_enabled.get(),
-            'parallel_search': self.parallel_search.get()
-        }
+        """Load configuration from shared config file."""
+        self.api_key.set(self.config.get('api_key', ''))
+        self.max_playlists.set(self.config.get('max_playlists', 100))
+        self.cache_enabled.set(self.config.get('cache_enabled', True))
+        self.parallel_search.set(self.config.get('parallel_search', True))
 
-        with open("gui_config.json", 'w') as f:
-            json.dump(config, f, indent=2)
+    def save_config(self):
+        """Persist configuration to shared config file."""
+        self.config.set('api_key', self.api_key.get(), autosave=False)
+        self.config.set('max_playlists', self.max_playlists.get(), autosave=False)
+        self.config.set('cache_enabled', self.cache_enabled.get(), autosave=False)
+        self.config.set('parallel_search', self.parallel_search.get(), autosave=False)
+        self.config.save()
         logger.info("GUI configuration saved")
     
     def center_window(self):

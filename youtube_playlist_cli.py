@@ -7,9 +7,8 @@ import os
 import sys
 import argparse
 import json
-import yaml
 import logging
-from typing import Dict, List, Optional
+from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 
@@ -38,63 +37,7 @@ except ImportError:
     sys.exit(1)
 
 
-class Config:
-    """Configuration management."""
-    
-    DEFAULT_CONFIG = {
-        "api_key": "",
-        "max_playlists": 100,
-        "cache_enabled": True,
-        "cache_dir": ".cache",
-        "output_dir": "results",
-        "parallel_search": True,
-        "export_formats": ["json", "html"],
-        "search_strategies": [
-            "exact_title",
-            "channel_playlists",
-            "title_channel",
-            "keyword_search"
-        ]
-    }
-    
-    def __init__(self, config_file: str = "config.yaml"):
-        self.config_file = config_file
-        self.config = self.load()
-    
-    def load(self) -> Dict:
-        """Load configuration from file."""
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r') as f:
-                    loaded = yaml.safe_load(f) or {}
-                    # Merge with defaults
-                    config = self.DEFAULT_CONFIG.copy()
-                    config.update(loaded)
-                    return config
-            except Exception as e:
-                logging.warning(f"Error loading config: {e}")
-        
-        # Create default config
-        self.save(self.DEFAULT_CONFIG)
-        return self.DEFAULT_CONFIG.copy()
-    
-    def save(self, config: Dict = None):
-        """Save configuration to file."""
-        config = config or self.config
-        try:
-            with open(self.config_file, 'w') as f:
-                yaml.dump(config, f, default_flow_style=False)
-        except Exception as e:
-            logging.error(f"Error saving config: {e}")
-    
-    def get(self, key: str, default=None):
-        """Get configuration value."""
-        return self.config.get(key, default)
-    
-    def set(self, key: str, value):
-        """Set configuration value."""
-        self.config[key] = value
-        self.save()
+from config import Config
 
 
 class CLIInterface:
