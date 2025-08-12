@@ -180,8 +180,12 @@ class YouTubeAPI:
         cache_key = hashlib.md5(
             f"{resource}.{method}_{kwargs}".encode()
         ).hexdigest()
+        # Avoid leaking API keys in logs
+        safe_kwargs = kwargs.copy()
+        if "key" in safe_kwargs:
+            safe_kwargs["key"] = "REDACTED"
         logging.debug(
-            "API request %s.%s with kwargs %s", resource, method, kwargs
+            "API request %s.%s with kwargs %s", resource, method, safe_kwargs
         )
         cached = self.cache.get(cache_key)
         if cached is not None:
